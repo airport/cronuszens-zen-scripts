@@ -1,0 +1,484 @@
+define CRONUSZENS_SHOT   = PS4_SQUARE;
+define CRONUSZENS_HOLD   = PS4_L2;
+define CRONUSZENS_TAP    = PS4_OPTIONS;
+define CRONUSZENS_UP     = PS4_UP;
+define CRONUSZENS_DOWN   = PS4_DOWN;
+define CRONUSZENS_LEFT   = PS4_LEFT;
+define CRONUSZENS_RIGHT  = PS4_RIGHT;
+define CRONUSZENS_PICK   = PS4_CROSS;
+define CRONUSZENS_BACK   = PS4_CIRCLE;
+define CRONUSZENS_FAST   = PS4_R2;
+
+define CRONUSZENS_ROWS = 4;
+
+int cronuszens_on     = TRUE;
+int cronuszens_timing = 600;
+int cronuszens_tempo  = 98;
+
+int cronuszens_timing_min = 100;
+int cronuszens_timing_max = 1500;
+int cronuszens_tempo_min  = 5;
+int cronuszens_tempo_max  = 200;
+
+int cronuszens_top_hold = 120;
+
+int cronuszens_xbox    = FALSE;
+int cronuszens_menu    = FALSE;
+int cronuszens_row     = 0;
+int cronuszens_dirty   = FALSE;
+int cronuszens_reset   = FALSE;
+
+int cronuszens_running = FALSE;
+int cronuszens_latched = FALSE;
+int cronuszens_hold_ms = 600;
+int cronuszens_step_ms = 16;
+int cronuszens_last_ms = 18;
+
+int cronuszens_dir    = 0;
+int cronuszens_held   = 0;
+int cronuszens_clock  = 0;
+int cronuszens_amount = 1;
+int cronuszens_gap    = 0;
+
+int cronuszens_ls_dir     = 0;
+int cronuszens_ls_timer   = 0;
+int cronuszens_ls_neutral = TRUE;
+int cronuszens_ls_value   = 0;
+int cronuszens_ls_abs     = 0;
+int cronuszens_ls_amount  = 1;
+int cronuszens_ls_delay   = 120;
+
+int cronuszens_guard  = FALSE;
+int cronuszens_quiet  = 0;
+int cronuszens_waited = 0;
+
+int cronuszens_i, cronuszens_y, cronuszens_ink;
+int cronuszens_digits, cronuszens_edge, cronuszens_place, cronuszens_at, cronuszens_digit;
+
+const string cronuszens_name[]  = { "Shot Tuner" };
+const string cronuszens_ver[]   = { "v27" };
+const string cronuszens_site[]  = { "cronuszens.com" };
+const string cronuszens_hint[]  = { "Hold L2 + Options", "Hold LT + Menu" };
+const string cronuszens_head[]  = { "SHOT TUNER" };
+
+const string cronuszens_row1[]  = { "Shot Tuner" };
+const string cronuszens_row2[]  = { "Timing" };
+const string cronuszens_row3[]  = { "Tempo" };
+const string cronuszens_row4[]  = { "Reset" };
+
+const string cronuszens_off[]   = { "OFF" };
+const string cronuszens_yes[]   = { "ON" };
+const string cronuszens_ms[]    = { "ms" };
+const string cronuszens_press[] = { "PRESS X", "PRESS A", "DONE" };
+const int8   cronuszens_plen[]  = { 7, 7, 4 };
+const string cronuszens_num[]   = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+
+
+init {
+    cronuszens_on     = get_pvar(SPVAR_1, 0, 1, 1);
+    cronuszens_timing = get_pvar(SPVAR_2, 100, 1500, 600);
+    cronuszens_tempo  = get_pvar(SPVAR_3, 5, 200, 98);
+    cronuszens_look();
+    cronuszens_home();
+}
+
+main {
+    cronuszens_look();
+    if (cronuszens_menu) vm_tctrl(0);
+    else vm_tctrl(-8);
+
+    if (!cronuszens_running && get_ival(CRONUSZENS_HOLD) > 20 && event_press(CRONUSZENS_TAP)) {
+        if (cronuszens_menu) cronuszens_close();
+        else cronuszens_open();
+    }
+
+    if (cronuszens_menu) {
+        if (event_press(CRONUSZENS_DOWN)) {
+            cronuszens_row++;
+            if (cronuszens_row >= CRONUSZENS_ROWS) cronuszens_row = 0;
+            cronuszens_rest();
+            cronuszens_draw();
+        }
+        if (event_press(CRONUSZENS_UP)) {
+            cronuszens_row--;
+            if (cronuszens_row < 0) cronuszens_row = CRONUSZENS_ROWS - 1;
+            cronuszens_rest();
+            cronuszens_draw();
+        }
+        if (event_press(CRONUSZENS_LEFT)) cronuszens_move(-1);
+        if (event_press(CRONUSZENS_RIGHT)) cronuszens_move(1);
+        cronuszens_repeat();
+        cronuszens_stick();
+        if (event_press(CRONUSZENS_PICK)) cronuszens_pick();
+        if (event_press(CRONUSZENS_BACK)) cronuszens_close();
+
+        block_all_inputs();
+        cronuszens_latched = FALSE;
+    }
+
+    else if (cronuszens_guard) {
+        block_all_inputs();
+        cronuszens_latched = FALSE;
+        cronuszens_waited = cronuszens_waited + get_rtime();
+        if (cronuszens_still()) cronuszens_quiet = cronuszens_quiet + get_rtime();
+        else cronuszens_quiet = 0;
+        if (cronuszens_quiet >= 80 || cronuszens_waited >= 1500) cronuszens_guard = FALSE;
+    }
+
+    else {
+        if (cronuszens_latched) {
+            set_val(CRONUSZENS_SHOT, 0);
+            if (event_release(CRONUSZENS_SHOT)) cronuszens_latched = FALSE;
+        }
+
+        if (cronuszens_on && !cronuszens_running && !cronuszens_latched
+            && event_press(CRONUSZENS_SHOT)) {
+            cronuszens_latched = TRUE;
+            cronuszens_running = TRUE;
+            cronuszens_hold_ms = cronuszens_timing;
+            cronuszens_step_ms = cronuszens_tempo / 6;
+            if (cronuszens_step_ms < 2) cronuszens_step_ms = 2;
+            cronuszens_last_ms = cronuszens_tempo - (5 * cronuszens_step_ms);
+            if (cronuszens_last_ms < 2) cronuszens_last_ms = 2;
+            set_val(CRONUSZENS_SHOT, 0);
+            combo_run(CronuszensShot);
+        }
+    }
+}
+
+combo CronuszensShot {
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, 100);
+    wait(cronuszens_hold_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, 70);
+    wait(cronuszens_step_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, 40);
+    wait(cronuszens_step_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, 5);
+    wait(cronuszens_step_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, -30);
+    wait(cronuszens_step_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, -60);
+    wait(cronuszens_step_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, -85);
+    wait(cronuszens_last_ms);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, -100);
+    wait(cronuszens_top_hold);
+    set_val(CRONUSZENS_SHOT, 0);
+    set_val(PS4_RX, 0); set_val(PS4_RY, 0);
+    wait(40);
+    set_val(CRONUSZENS_SHOT, 0);
+    cronuszens_running = FALSE;
+}
+
+combo CronuszensTick {
+    set_rumble(RUMBLE_A, 45);
+    wait(45);
+    reset_rumble();
+}
+
+
+function cronuszens_open() {
+    cronuszens_menu = TRUE;
+    cronuszens_row = 0;
+    cronuszens_dirty = FALSE;
+    cronuszens_reset = FALSE;
+    cronuszens_rest();
+    cronuszens_draw();
+    return 0;
+}
+
+function cronuszens_close() {
+    if (cronuszens_dirty) cronuszens_save();
+    cronuszens_dirty = FALSE;
+    cronuszens_menu = FALSE;
+    cronuszens_guard = TRUE;
+    cronuszens_quiet = 0;
+    cronuszens_waited = 0;
+    cronuszens_rest();
+    cronuszens_home();
+    return 0;
+}
+
+function cronuszens_save() {
+    set_pvar(SPVAR_1, cronuszens_on);
+    set_pvar(SPVAR_2, cronuszens_timing);
+    set_pvar(SPVAR_3, cronuszens_tempo);
+    return 0;
+}
+
+function cronuszens_pick() {
+    if (cronuszens_row == 0) {
+        cronuszens_on = !cronuszens_on;
+        cronuszens_dirty = TRUE;
+        cronuszens_reset = FALSE;
+    }
+    else if (cronuszens_row == 3) {
+        cronuszens_on = TRUE;
+        cronuszens_timing = 600;
+        cronuszens_tempo = 98;
+        cronuszens_save();
+        cronuszens_dirty = FALSE;
+        cronuszens_reset = TRUE;
+    }
+    else return 0;
+
+    combo_run(CronuszensTick);
+    cronuszens_draw();
+    return 0;
+}
+
+function cronuszens_move(int by) {
+    if (cronuszens_row == 1) {
+        cronuszens_timing = cronuszens_clamp(cronuszens_timing + by,
+                                             cronuszens_timing_min, cronuszens_timing_max);
+    }
+    else if (cronuszens_row == 2) {
+        cronuszens_tempo = cronuszens_clamp(cronuszens_tempo + by,
+                                            cronuszens_tempo_min, cronuszens_tempo_max);
+    }
+    else if (cronuszens_row == 0) {
+        if (by > 0) cronuszens_on = TRUE;
+        else cronuszens_on = FALSE;
+    }
+    else return 0;
+
+    cronuszens_dirty = TRUE;
+    cronuszens_reset = FALSE;
+    cronuszens_draw();
+    return 0;
+}
+
+function cronuszens_repeat() {
+    if (cronuszens_row != 1 && cronuszens_row != 2) {
+        cronuszens_rest_pad();
+        return 0;
+    }
+
+    cronuszens_i = 0;
+    if (get_ival(CRONUSZENS_LEFT) && !get_ival(CRONUSZENS_RIGHT)) cronuszens_i = -1;
+    else if (get_ival(CRONUSZENS_RIGHT) && !get_ival(CRONUSZENS_LEFT)) cronuszens_i = 1;
+
+    if (!cronuszens_i) {
+        cronuszens_rest_pad();
+        return 0;
+    }
+    if (cronuszens_i != cronuszens_dir) {
+        cronuszens_dir = cronuszens_i;
+        cronuszens_held = 0;
+        cronuszens_clock = 0;
+        return 0;
+    }
+
+    cronuszens_held = cronuszens_held + get_rtime();
+    if (cronuszens_held < 350) return 0;
+
+    cronuszens_gap = 90;
+    if (cronuszens_held >= 1500) cronuszens_gap = 35;
+    cronuszens_clock = cronuszens_clock + get_rtime();
+    if (cronuszens_clock < cronuszens_gap) return 0;
+    cronuszens_clock = 0;
+
+    cronuszens_amount = 1;
+    if (get_ival(CRONUSZENS_FAST) > 20) cronuszens_amount = 10;
+    cronuszens_move(cronuszens_dir * cronuszens_amount);
+    return 0;
+}
+
+function cronuszens_stick() {
+    if (cronuszens_row != 1 && cronuszens_row != 2) {
+        cronuszens_ls_dir = 0;
+        cronuszens_ls_timer = 0;
+        return 0;
+    }
+
+    cronuszens_ls_value = get_ival(PS4_LX);
+    if (cronuszens_ls_value < 0) cronuszens_ls_abs = -cronuszens_ls_value;
+    else cronuszens_ls_abs = cronuszens_ls_value;
+
+    if (cronuszens_ls_neutral) {
+        if (cronuszens_ls_abs < 35) {
+            cronuszens_ls_neutral = FALSE;
+            cronuszens_ls_dir = 0;
+            cronuszens_ls_timer = 0;
+        }
+        return 0;
+    }
+
+    if (cronuszens_ls_abs < 55) {
+        cronuszens_ls_dir = 0;
+        cronuszens_ls_timer = 0;
+        return 0;
+    }
+
+    if (cronuszens_ls_value < 0) {
+        if (cronuszens_ls_dir != -1) {
+            cronuszens_ls_dir = -1;
+            cronuszens_ls_timer = 0;
+            cronuszens_move(-1);
+            return 0;
+        }
+    }
+    else {
+        if (cronuszens_ls_dir != 1) {
+            cronuszens_ls_dir = 1;
+            cronuszens_ls_timer = 0;
+            cronuszens_move(1);
+            return 0;
+        }
+    }
+
+    cronuszens_ls_amount = 1;
+    cronuszens_ls_delay = 120;
+    if (cronuszens_ls_abs >= 90) {
+        cronuszens_ls_amount = 5;
+        cronuszens_ls_delay = 70;
+    }
+    else if (cronuszens_ls_abs >= 75) {
+        cronuszens_ls_amount = 2;
+        cronuszens_ls_delay = 90;
+    }
+    if (get_ival(CRONUSZENS_FAST) > 20) cronuszens_ls_amount = cronuszens_ls_amount * 10;
+
+    cronuszens_ls_timer = cronuszens_ls_timer + get_rtime();
+    if (cronuszens_ls_timer >= cronuszens_ls_delay) {
+        cronuszens_ls_timer = 0;
+        cronuszens_move(cronuszens_ls_dir * cronuszens_ls_amount);
+    }
+    return 0;
+}
+
+function cronuszens_rest_pad() {
+    cronuszens_dir = 0;
+    cronuszens_held = 0;
+    cronuszens_clock = 0;
+    return 0;
+}
+
+function cronuszens_rest() {
+    cronuszens_rest_pad();
+    cronuszens_ls_dir = 0;
+    cronuszens_ls_timer = 0;
+    cronuszens_ls_neutral = TRUE;
+    return 0;
+}
+
+function cronuszens_home() {
+    cls_oled(OLED_BLACK);
+    print(2, 2, OLED_FONT_MEDIUM, OLED_WHITE, cronuszens_name[0]);
+    line_oled(0, 23, 127, 23, 1, OLED_WHITE);
+    print(2, 28, OLED_FONT_SMALL, OLED_WHITE, cronuszens_site[0]);
+    print(2, 40, OLED_FONT_SMALL, OLED_WHITE, cronuszens_ver[0]);
+    print(2, 52, OLED_FONT_SMALL, OLED_WHITE, cronuszens_hint[cronuszens_xbox]);
+    return 0;
+}
+
+function cronuszens_draw() {
+    cls_oled(OLED_BLACK);
+    print(2, 0, OLED_FONT_SMALL, OLED_WHITE, cronuszens_head[0]);
+    line_oled(0, 10, 127, 10, 1, OLED_WHITE);
+
+    for (cronuszens_i = 0; cronuszens_i < CRONUSZENS_ROWS; cronuszens_i++) {
+        cronuszens_y = 14 + (cronuszens_i * 12);
+        if (cronuszens_i == cronuszens_row) {
+            rect_oled(0, cronuszens_y - 1, OLED_WIDTH, 11, 1, OLED_WHITE);
+            cronuszens_ink = OLED_BLACK;
+        }
+        else cronuszens_ink = OLED_WHITE;
+
+        if (cronuszens_i == 0) {
+            print(2, cronuszens_y, OLED_FONT_SMALL, cronuszens_ink, cronuszens_row1[0]);
+            cronuszens_state(cronuszens_on, cronuszens_y, cronuszens_ink);
+        }
+        else if (cronuszens_i == 1) {
+            print(2, cronuszens_y, OLED_FONT_SMALL, cronuszens_ink, cronuszens_row2[0]);
+            cronuszens_value(cronuszens_timing, cronuszens_y, cronuszens_ink);
+        }
+        else if (cronuszens_i == 2) {
+            print(2, cronuszens_y, OLED_FONT_SMALL, cronuszens_ink, cronuszens_row3[0]);
+            cronuszens_value(cronuszens_tempo, cronuszens_y, cronuszens_ink);
+        }
+        else {
+            print(2, cronuszens_y, OLED_FONT_SMALL, cronuszens_ink, cronuszens_row4[0]);
+            cronuszens_at = cronuszens_xbox;
+            if (cronuszens_reset) cronuszens_at = 2;
+            print(cronuszens_right(cronuszens_plen[cronuszens_at]), cronuszens_y,
+                  OLED_FONT_SMALL, cronuszens_ink, cronuszens_press[cronuszens_at]);
+        }
+    }
+    return 0;
+}
+
+function cronuszens_right(int chars) {
+    return OLED_WIDTH - (chars * 7);
+}
+
+function cronuszens_state(int flag, int line, int ink) {
+    if (flag) print(cronuszens_right(2), line, OLED_FONT_SMALL, ink, cronuszens_yes[0]);
+    else print(cronuszens_right(3), line, OLED_FONT_SMALL, ink, cronuszens_off[0]);
+    return 0;
+}
+
+function cronuszens_value(int value, int line, int ink) {
+    if (value < 0) value = 0;
+    cronuszens_digits = 1;
+    if (value >= 10) cronuszens_digits = 2;
+    if (value >= 100) cronuszens_digits = 3;
+    if (value >= 1000) cronuszens_digits = 4;
+
+    cronuszens_edge = OLED_WIDTH - 14;
+    cronuszens_at = cronuszens_edge - (cronuszens_digits * 7);
+    cronuszens_place = 1;
+    if (cronuszens_digits == 2) cronuszens_place = 10;
+    else if (cronuszens_digits == 3) cronuszens_place = 100;
+    else if (cronuszens_digits == 4) cronuszens_place = 1000;
+
+    while (cronuszens_place > 0) {
+        cronuszens_digit = (value / cronuszens_place) % 10;
+        print(cronuszens_at, line, OLED_FONT_SMALL, ink, cronuszens_num[cronuszens_digit]);
+        cronuszens_at = cronuszens_at + 7;
+        cronuszens_place = cronuszens_place / 10;
+    }
+    print(cronuszens_edge, line, OLED_FONT_SMALL, ink, cronuszens_ms[0]);
+    return 0;
+}
+
+function cronuszens_look() {
+    if (get_console() == PIO_XB1 || get_console() == PIO_XB360) cronuszens_xbox = TRUE;
+    else cronuszens_xbox = FALSE;
+    return 0;
+}
+
+function cronuszens_still() {
+    if (get_ival(PS4_UP) > 10) return FALSE;
+    if (get_ival(PS4_DOWN) > 10) return FALSE;
+    if (get_ival(PS4_LEFT) > 10) return FALSE;
+    if (get_ival(PS4_RIGHT) > 10) return FALSE;
+    if (get_ival(PS4_CROSS) > 10) return FALSE;
+    if (get_ival(PS4_CIRCLE) > 10) return FALSE;
+    if (get_ival(PS4_SQUARE) > 10) return FALSE;
+    if (get_ival(PS4_TRIANGLE) > 10) return FALSE;
+    if (get_ival(PS4_L1) > 10) return FALSE;
+    if (get_ival(PS4_R1) > 10) return FALSE;
+    if (get_ival(PS4_L2) > 10) return FALSE;
+    if (get_ival(PS4_R2) > 10) return FALSE;
+    if (get_ival(PS4_OPTIONS) > 10) return FALSE;
+    if (get_ival(PS4_RY) >= 28 || get_ival(PS4_RY) <= -28) return FALSE;
+    if (get_ival(PS4_RX) >= 28 || get_ival(PS4_RX) <= -28) return FALSE;
+    if (get_ival(PS4_LY) >= 28 || get_ival(PS4_LY) <= -28) return FALSE;
+    if (get_ival(PS4_LX) >= 28 || get_ival(PS4_LX) <= -28) return FALSE;
+    return TRUE;
+}
+
+function cronuszens_clamp(int value, int low, int high) {
+    if (value < low) return low;
+    if (value > high) return high;
+    return value;
+}
